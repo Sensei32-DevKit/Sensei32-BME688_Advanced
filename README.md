@@ -82,7 +82,7 @@ Even if Sensei32 uses BME688, **BOSCH BSEC library for BME680** must be installe
 
 BOSCH BSEC is an advanced library for the BME680 sensor (compatible with the BME688) that is used in place of the BME680 Library form Adafruit.
 Since BSEC is provided as a closed-source pre-compiled library by BOSCH, following the guide on [BOSCH BSEC Library Github][bsec] is the suggested step. 
-However, after installing the library from the Arduino IDE Library Manager, here you can find some images of the ESP32 "platform.txt" editing process.
+However, **after installing the library from the Arduino IDE Library Manager**, here you can find some images of the ESP32 "platform.txt" editing process.
 
 For **MacOs** users firstly, open Arduino Preferences by clicking on(2).
 
