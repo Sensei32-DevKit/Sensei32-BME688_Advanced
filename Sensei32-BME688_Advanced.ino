@@ -262,7 +262,7 @@ void loop() {
   }
 
   // Advance the OnTime for the BSEC Library
-  OnTime_s = OnTime_s + (SLEEP_TIME_s * 1000) + millis();
+  OnTime_s = OnTime_s + SLEEP_TIME_s + (millis() * 1000);
   
   // Start deep-sleep
   bootCount++;
@@ -336,7 +336,8 @@ void DumpState(const char* name, const uint8_t* state) {
 void readIaqSensor()
 {
 
-  if (iaqSensor.run()) { // If new data is available, time must be given is ms (epoch is in s)
+  long time_trigger_ms = OnTime_s * 1000;
+  if (iaqSensor.run(time_trigger_ms)) { // If new data is available, time must be given is ms (epoch is in s)
 
     const BsecOutput* outputs = iaqSensor.getOutputs();
     uint8_t sensorAccuracy = 0;
