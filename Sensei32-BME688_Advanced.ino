@@ -29,8 +29,8 @@
 
 #include <EEPROM.h>
 
-#include <Wire.h>
 #include "bsec.h"
+#include "config/generic_33v_300s_4d/bsec_serialized_configurations_selectivity.h"
 
 /*******************************************************************************************
  *
@@ -84,25 +84,23 @@ bool  VBUS_Status = false, InCharge_Status = false;
 // BME688 add an AI core, not yet supported in BOSCH BSEC, over the BME680 functions:
 // Existing BOSCH BSEC BME680 library are however compatible with BME688  
 Bsec iaqSensor;
-const uint8_t bsec_config_iaq[] = {
-  #include "config/generic_33v_300s_4d/bsec_iaq.txt"
-};
+
 // Sensor state is stored to eeprom 4 times a day, as suggested by BOSH
 // Between deep-sleeps, sensors state is retained in RTC memory
 RTC_DATA_ATTR uint8_t sensor_state[BSEC_MAX_STATE_BLOB_SIZE] = {0};
 RTC_DATA_ATTR uint8_t sensor_state_isValid = 0;
 // Data retrieved from the BME688 sensor
 bsec_virtual_sensor_t sensor_list[] = {
-  BSEC_OUTPUT_RAW_TEMPERATURE,
-  BSEC_OUTPUT_RAW_PRESSURE,
-  BSEC_OUTPUT_RAW_HUMIDITY,
-  BSEC_OUTPUT_RAW_GAS,
-  BSEC_OUTPUT_IAQ,
-  BSEC_OUTPUT_STATIC_IAQ,
-  BSEC_OUTPUT_CO2_EQUIVALENT,
-  BSEC_OUTPUT_BREATH_VOC_EQUIVALENT,
-  BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_TEMPERATURE,
-  BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_HUMIDITY,
+    BSEC_OUTPUT_IAQ,                                  // 1
+    BSEC_OUTPUT_STATIC_IAQ,                           // 2
+    BSEC_OUTPUT_CO2_EQUIVALENT,                       // 3
+    BSEC_OUTPUT_BREATH_VOC_EQUIVALENT,                // 4
+    BSEC_OUTPUT_RAW_TEMPERATURE,                      // 6
+    BSEC_OUTPUT_RAW_PRESSURE,                         // 7
+    BSEC_OUTPUT_RAW_HUMIDITY,                         // 8
+    BSEC_OUTPUT_RAW_GAS,                              // 9
+    BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_TEMPERATURE,  // 14
+    BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_HUMIDITY,     // 15
 };
 String dbg_output;
 
@@ -152,9 +150,7 @@ void setup() {
   
   // b) Init I2C comms and BME688 sensor
   Wire.begin();
-  iaqSensor.begin(0x76, Wire);
-  checkIaqSensorStatus();
-  iaqSensor.setConfig(bsec_config_iaq);
+  iaqSensor.begin(BME68X_I2C_ADDR_LOW, Wire);  //0x76
   checkIaqSensorStatus();
 
   // c) Manage Stored Sensor State
@@ -180,6 +176,10 @@ void setup() {
     }
   
   } else {
+
+    // The sensor must be configured for ULP operation (only a first cold boot)
+    iaqSensor.setConfig(bsec_config_selectivity);
+    checkIaqSensorStatus();
   
     // Status cannot be restored from RTC after the first boot
     // We must check if we have a non-volatile record in EEPROM
@@ -265,7 +265,8 @@ void loop() {
   OnTime_s = OnTime_s + (SLEEP_TIME_s * 1000) + millis();
   
   // Start deep-sleep
-  Serial.println("[Sensei32 - Core] Starting " + String(SLEEP_TIME_s) + "s of Deep-Sleep");
+  bootCount++;
+  Serial.println("[Sensei32 - Core] Starting " + String(SLEEP_TIME_s) + "s of Deep-Sleep, BootCount #" + String(bootCount));
   esp_sleep_enable_timer_wakeup( SLEEP_TIME_s  * 1000000LL ); 
   esp_deep_sleep_start();
   
@@ -285,22 +286,26 @@ void loop() {
   */
 void checkIaqSensorStatus()
 {
-  if (iaqSensor.status != BSEC_OK) {
-    if (iaqSensor.status < BSEC_OK) {
-      dbg_output = "[" + String(millis()) + "] BME688: BSEC error code : " + String(iaqSensor.status);
+
+  int bsec_status = (int)iaqSensor.getBsecStatus();
+  int bme68x_status = (int)iaqSensor.getBme68xStatus();
+  
+  if (bsec_status != BSEC_OK) {
+    if (bsec_status < BSEC_OK) {
+      dbg_output = "[" + String(millis()) + "] BME688: BSEC error code : " + String(bsec_status);
       Serial.println(dbg_output);
     } else {
-      dbg_output = "[" + String(millis()) + "] BME688: BSEC warning code : " + String(iaqSensor.status);
+      dbg_output = "[" + String(millis()) + "] BME688: BSEC warning code : " + String(bsec_status);
       Serial.println(dbg_output);
     }
   }
 
-  if (iaqSensor.bme680Status != BME680_OK) {
-    if (iaqSensor.bme680Status < BME680_OK) {
-      dbg_output = "[" + String(millis()) + "] BME688: Error code : " + String(iaqSensor.bme680Status);
+  if (bme68x_status != BME68X_OK) {
+    if (bme68x_status < BME68X_OK) {
+      dbg_output = "[" + String(millis()) + "] BME688: Error code : " + String(bme68x_status);
       Serial.println(dbg_output);
     } else {
-      dbg_output = "[" + String(millis()) + "] BME688: Warning code : " + String(iaqSensor.bme680Status);
+      dbg_output = "[" + String(millis()) + "] BME688: Warning code : " + String(bme68x_status);
       Serial.println(dbg_output);
     }
   }
@@ -331,18 +336,69 @@ void DumpState(const char* name, const uint8_t* state) {
 void readIaqSensor()
 {
 
-  long time_trigger_ms = OnTime_s * 1000;
-  if (iaqSensor.run( time_trigger_ms )) { // If new data is available, time must be given is ms (epoch is in s)
-    Serial.println("[" + String(millis()) + "] BME688: OnTime = " + String(OnTime_s) + " ms");
-    Serial.println("[" + String(millis()) + "] BME688: Temperature    = " + String(iaqSensor.temperature) + " *C");
-    Serial.println("[" + String(millis()) + "] BME688: Humidity       = " + String(iaqSensor.humidity) + " %");
-    Serial.println("[" + String(millis()) + "] BME688: Pressure       = " + String(iaqSensor.pressure / 100.0) + " hPa");
-    Serial.println("[" + String(millis()) + "] BME688: GasResistance  = " + String(iaqSensor.gasResistance / 1000.0) + " Ohms");
-    Serial.println("[" + String(millis()) + "] BME688: eCO2           = " + String(iaqSensor.co2Equivalent) + " ppm");
-    Serial.println("[" + String(millis()) + "] BME688: bVOC           = " + String(iaqSensor.breathVocEquivalent) + " ppb");
-    Serial.println("[" + String(millis()) + "] BME688: IAQ            = " + String(iaqSensor.iaq));
-    Serial.println("[" + String(millis()) + "] BME688: IAQ-Accuracy   = " + String(iaqSensor.iaqAccuracy));
+  if (iaqSensor.run()) { // If new data is available, time must be given is ms (epoch is in s)
 
+    const BsecOutput* outputs = iaqSensor.getOutputs();
+    uint8_t sensorAccuracy = 0;
+    if(outputs != nullptr){
+      if (outputs->len){
+        // Outputs must contains data and have len != 0
+        Serial.println("[" + String(millis()) + "] BME688: OnTime = " + String(OnTime_s) + " ms");
+        for (uint8_t i = 0; i < outputs->len; i++) {
+          const bsec_output_t* data_output = &(outputs->outputs[i]);
+          switch (data_output->sensor_id) {
+            case BSEC_OUTPUT_RAW_TEMPERATURE:
+              Serial.println("[" + String(millis()) + "] BME688: Raw Temperature = " + String(data_output->signal) + " *C");
+            break;
+            case BSEC_OUTPUT_RAW_PRESSURE:
+              Serial.println("[" + String(millis()) + "] BME688: Pressure        = " + String(data_output->signal / 100.0) + " hPa");
+            break;
+            case BSEC_OUTPUT_RAW_HUMIDITY:
+              Serial.println("[" + String(millis()) + "] BME688: Raw Humidity    = " + String(data_output->signal) + " %");
+            break;
+            case BSEC_OUTPUT_RAW_GAS:
+              Serial.println("[" + String(millis()) + "] BME688: GasResistance   = " + String(data_output->signal / 1000.0) + " Ohms");
+            break;
+            case BSEC_OUTPUT_IAQ:
+              sensorAccuracy = (uint8_t)data_output->accuracy;
+              Serial.println("[" + String(millis()) + "] BME688: IAQ             = " + String(data_output->signal));
+              Serial.println("[" + String(millis()) + "] BME688: IAQ-Accuracy    = " + String(sensorAccuracy));
+            break;
+            case BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_TEMPERATURE:
+              Serial.println("[" + String(millis()) + "] BME688: Temperature     = " + String(data_output->signal) + " *C");
+            break;
+            case BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_HUMIDITY:
+              Serial.println("[" + String(millis()) + "] BME688: Humidity        = " + String(data_output->signal) + " %");
+            break;
+            case BSEC_OUTPUT_STATIC_IAQ:
+              Serial.println("[" + String(millis()) + "] BME688: Static IAQ      = " + String(data_output->signal));
+            break;
+            case BSEC_OUTPUT_CO2_EQUIVALENT:
+              Serial.println("[" + String(millis()) + "] BME688: eCO2            = " + String(data_output->signal) + " ppm");
+            break;
+            case BSEC_OUTPUT_BREATH_VOC_EQUIVALENT:
+              Serial.println("[" + String(millis()) + "] BME688: bVOC            = " + String(data_output->signal) + " ppb");
+            break;
+            default:
+            break;
+          }
+        }
+      }
+    }
+
+    if( sensorAccuracy >= 3 ){
+      // Store current sensor status into RTC memory
+      iaqSensor.getState(sensor_state);
+      // Debug State Dump
+      // DumpState("[" + String(millis()) + "] BME688: RTC_getState", sensor_state);
+      // Signal that the sensor state has been updated
+      sensor_state_isValid = 1;
+    } else {
+      // Signal that the sensor state is not ready to be stored
+      sensor_state_isValid = 0;
+    }
+      
+/* BSEC 2.x internally manages nextCall, this error handling shouldn't be necessary
     // Check if the nextCall is coherent, must be exactly 5 minutes.
     // BSEC suffers from internal overflow when managing time, but no error is thrown from the stack
     // When this happens IAQ, bVOC and CO2 measurments freeze and nextCall return random values.
@@ -374,6 +430,7 @@ void readIaqSensor()
       // d) Reset the Sensor OnTime variable
       OnTime_s = 0;
     }
+*/
     checkIaqSensorStatus();
     
   } else {

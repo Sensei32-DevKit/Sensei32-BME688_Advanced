@@ -1,4 +1,4 @@
-# Sensei32: BME688 Advanced Sensor Read - BOSCH BSEC Library
+# Sensei32: BME688 Advanced Sensor Read - BOSCH BSEC 2.x Library (EXPERIMENTAL)
 
 Sensei32 is a high-quality ULP, Battery-Powered, ESP32 board with embedded environment sensors.
 
